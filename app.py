@@ -1,34 +1,33 @@
-# === IMPORTAÇÕES NECESSÁRIAS ===
+# === IMPORTAÇÕES ===
 import streamlit as st
 import pandas as pd
 import plotly.express as px
 from io import BytesIO
-from datetime import timedelta
+import pdfkit
+from datetime import datetime
 
-# === CONFIGURAÇÃO DE LOGIN ===
-users = {
-    "admin": "senha123",
-    "marcelo": "condominiojosef"
-}
+# === CONFIGURAÇÃO DO APP ===
+st.set_page_config(page_title="Dashboard - Steel Facility", layout="wide", page_icon="🏗️")
 
-st.set_page_config(page_title="Dashboard - Condomínio Josef", layout="wide", page_icon="🏗️")
+# === LOGIN ===
+users = {"admin": "senha123", "marcelo": "condominiojosef"}
 
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
 
 if not st.session_state.logged_in:
     st.title("🔐 Acesso Restrito")
-    username = st.text_input("Usuário", placeholder="Digite seu usuário")
-    password = st.text_input("Senha", type="password", placeholder="Digite sua senha")
+    username = st.text_input("Usuário")
+    password = st.text_input("Senha", type="password")
     if st.button("Entrar"):
         if username in users and users[username] == password:
             st.session_state.logged_in = True
-            st.success(f"✅ Bem-vindo, {username}!")
+            st.success(f"Bem-vindo, {username}!")
         else:
-            st.error("❌ Usuário ou senha inválidos.")
+            st.error("Usuário ou senha inválidos.")
     st.stop()
 
-# === FUNÇÕES AUXILIARES ===
+# === FUNÇÕES ===
 def calcular_fases(custo_total):
     fases = {
         'Mobilização': 0.25,
@@ -43,33 +42,82 @@ def calcular_fases(custo_total):
         'Custo Estimado': [round(custo_total * p, 2) for p in fases.values()]
     })
 
-def gerar_cronograma(df_fases, data_inicio='2025-07-15'):
-    df_fases['Duração (dias)'] = [20, 20, 15, 15, 10]
-    df_fases['Início'] = pd.date_range(start=data_inicio, periods=len(df_fases), freq='B')
-    df_fases['Término'] = df_fases['Início'] + pd.to_timedelta(df_fases['Duração (dias)'], unit='D')
+def gerar_cronograma(df_fases, inicio='2025-07-15'):
+    df_fases['Duração'] = [20, 20, 15, 15, 10]
+    df_fases['Início'] = pd.date_range(start=inicio, periods=len(df_fases), freq='B')
+    df_fases['Término'] = df_fases['Início'] + pd.to_timedelta(df_fases['Duração'], unit='D')
     fig = px.timeline(df_fases, x_start="Início", x_end="Término", y="Fase da Obra", color="Fase da Obra")
-    fig.update_layout(title="🗓️ Cronograma da Obra", xaxis_title="Data", yaxis_title="Fase")
+    fig.update_layout(title="Cronograma da Obra", xaxis_title="Data", yaxis_title="Etapa")
     return fig
 
-def exportar_excel(df1, df2):
+def exportar_excel(df1, df2, nome="orcamento.xlsx"):
     output = BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
         df1.to_excel(writer, index=False, sheet_name="Resumo Casas")
         df2.to_excel(writer, index=False, sheet_name="Fases da Obra")
     return output.getvalue()
 
-def exportar_simulacoes(df_sim):
-    output = BytesIO()
-    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        df_sim.to_excel(writer, index=False, sheet_name="Simulações")
-    return output.getvalue()
+def gerar_proposta_em_pdf(simulacao, fases_df):
+    hoje = datetime.today().strftime("%d/%m/%Y")
+    fases_html = "".join([
+        f"<tr><td>{row['Fase da Obra']}</td><td>R$ {row['Custo Estimado']:,.2f}</td></tr>"
+        for _, row in fases_df.iterrows()
+    ])
 
-# === INTERFACE PRINCIPAL ===
-st.title("📊 Dashboard do Orçamento - Condomínio Josef")
+    html = f"""
+    <html>
+    <head>
+    <style>
+    body {{ font-family: Arial; padding: 40px; }}
+    .logo {{ text-align: center; margin-bottom: 30px; }}
+    .rodape {{ text-align: center; font-size: 12px; color: #555; margin-top: 50px; }}
+    table {{ border-collapse: collapse; width: 100%; margin-top: 10px; }}
+    th, td {{ border: 1px solid #ccc; padding: 8px; text-align: left; }}
+    </style>
+    </head>
+    <body>
+    <div class="logo">
+    <img src="logo_facility.png" width="120">
+    </div>
+    <h2>Proposta Comercial – {simulacao['Nome']}</h2>
+    <p><strong>Data:</strong> {hoje}</p>
+    <p><strong>Área:</strong> {simulacao['Área (m²)']} m²<br>
+       <strong>Preço Unitário:</strong> R$ {simulacao['Preço Unitário']:,.2f}<br>
+       <strong>BDI Mão de Obra:</strong> {simulacao['BDI MDO (%)']}%<br>
+       <strong>BDI Materiais:</strong> {simulacao['BDI MAT (%)']}%<br>
+       <strong>Custo Final:</strong> <strong>R$ {simulacao['Custo Final']:,.2f}</strong>
+    </p>
+    <h4>Fases da Obra</h4>
+    <table>
+    <tr><th>Fase</th><th>Custo Estimado</th></tr>
+    {fases_html}
+    </table>
+    <h4>Condições Comerciais</h4>
+    <p>Validade: 30 dias<br>
+       Forma de pagamento: A combinar<br>
+       Incluso: Projeto executivo + execução<br>
+       Não incluso: Fundações específicas, taxas municipais
+    </p>
+    <div class="rodape">
+    Steel Facility · Rua Ubá, 15 – Vila Virginia – Itaquaquecetuba · steelfacility@gmail.com · @steelfacilitybr<br>
+    Assinatura: Marcelo Barbosa – CEO
+    </div>
+    </body>
+    </html>
+    """
 
-file = st.file_uploader("📁 Envie uma planilha (.xlsx) com os dados das casas", type=["xlsx"])
-if file:
-    df_casas = pd.read_excel(file)
+    with open("proposta_temp.html", "w", encoding="utf-8") as f:
+        f.write(html)
+
+    pdfkit.from_file("proposta_temp.html", "proposta_gerada.pdf")
+    return "proposta_gerada.pdf"
+
+# === DADOS INICIAIS ===
+st.title("Dashboard Steel Facility")
+
+uploaded = st.file_uploader("📁 Upload da planilha de casas (.xlsx)", type=["xlsx"])
+if uploaded:
+    df_casas = pd.read_excel(uploaded)
 else:
     df_casas = pd.DataFrame([
         {'Casa': f'Casa {i+1}', 'Área (m²)': area, 'Preço Unitário': 836.47}
@@ -80,89 +128,36 @@ df_casas['Custo Total'] = df_casas['Área (m²)'] * df_casas['Preço Unitário']
 df_casas['Custo MDO + BDI'] = df_casas['Custo Total'] * 1.025
 df_casas['Custo Final'] = df_casas['Custo MDO + BDI'] * 1.013
 df_casas['Eficiência'] = 1000 / df_casas['Custo Final']
-df_casas['Melhor Custo-Benefício'] = df_casas['Eficiência'] == df_casas['Eficiência'].max()
+df_casas['Melhor'] = df_casas['Eficiência'] == df_casas['Eficiência'].max()
 
-# === ANÁLISE INDIVIDUAL ===
-casa_selecionada = st.selectbox("🏠 Selecione uma casa", df_casas['Casa'])
-df_selecionada = df_casas[df_casas['Casa'] == casa_selecionada]
+casa = st.selectbox("Selecione uma casa", df_casas['Casa'])
+df_sel = df_casas[df_casas['Casa'] == casa]
 
-col1, col2 = st.columns(2)
-with col1:
-    st.metric("Área (m²)", f"{df_selecionada['Área (m²)'].values[0]:.2f}")
-    st.metric("Preço Unitário", f"R$ {df_selecionada['Preço Unitário'].values[0]:,.2f}")
-with col2:
-    st.metric("Custo Final", f"R$ {df_selecionada['Custo Final'].values[0]:,.2f}")
-    st.metric("Eficiência", f"{df_selecionada['Eficiência'].values[0]:.2f}")
-
-st.subheader("📋 Tabela Geral das Casas")
+st.metric("Área (m²)", f"{df_sel['Área (m²)'].values[0]:.2f}")
+st.metric("Custo Final", f"R$ {df_sel['Custo Final'].values[0]:,.2f}")
 st.dataframe(df_casas)
 
-# === FASES E CRONOGRAMA ===
-df_fases = calcular_fases(df_selecionada['Custo Total'].values[0])
-st.subheader("🔧 Simulação das Fases da Obra")
-st.dataframe(df_fases)
+fases_df = calcular_fases(df_sel['Custo Total'].values[0])
+st.subheader("Fases da Obra")
+st.dataframe(fases_df)
 
-st.subheader("🗓️ Cronograma da Obra")
-fig = gerar_cronograma(df_fases)
+fig = gerar_cronograma(fases_df)
 st.plotly_chart(fig)
 
 # === EXPORTAÇÃO PRINCIPAL ===
-st.subheader("📥 Exportar Orçamento Original")
-excel_principal = exportar_excel(df_casas, df_fases)
-st.download_button("Baixar Excel", data=excel_principal, file_name="orcamento_principal.xlsx",
+excel_bytes = exportar_excel(df_casas, fases_df)
+st.download_button("📥 Exportar Orçamento Original", data=excel_bytes, file_name="orcamento_steel.xlsx",
                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
-# === SIMULAÇÕES DE NOVOS ORÇAMENTOS ===
-st.header("🧮 Criar Novo Orçamento Baseado no Original")
+# === NOVO ORÇAMENTO ===
+st.header("Criar Novo Orçamento")
 
 if "simulacoes" not in st.session_state:
     st.session_state.simulacoes = []
 
-with st.form("simulador"):
-    nome = st.text_input("Nome do orçamento", value=f"Simulação {len(st.session_state.simulacoes)+1}")
-    area = st.number_input("Área (m²)", value=140.00)
-    preco = st.number_input("Preço Unitário (R$/m²)", value=836.47)
+with st.form("nova_simulacao"):
+    nome = st.text_input("Nome", value=f"Simulação {len(st.session_state.simulacoes)+1}")
+    area = st.number_input("Área (m²)", value=140.0)
+    preco = st.number_input("Preço Unitário", value=836.47)
     bdi_mdo = st.number_input("BDI Mão de Obra (%)", value=2.5)
-    bdi_mat = st.number_input("BDI Materiais (%)", value=1.3)
-    gerar = st.form_submit_button("Gerar Orçamento")
-
-if gerar:
-    custo = area * preco
-    custo_mdo = custo * (1 + bdi_mdo / 100)
-    custo_final = custo_mdo * (1 + bdi_mat / 100)
-    eficiencia = 1000 / custo_final
-    nova_sim = {
-        "Nome": nome,
-        "Área (m²)": area,
-        "Preço Unitário": preco,
-        "Custo Final": custo_final,
-        "Eficiência": eficiencia,
-        "BDI MDO (%)": bdi_mdo,
-        "BDI MAT (%)": bdi_mat
-    }
-    st.session_state.simulacoes.append(nova_sim)
-    st.success(f"✅ Simulação criada: R$ {custo_final:,.2f}")
-
-# === HISTÓRICO DE SIMULAÇÕES ===
-if st.session_state.simulacoes:
-    st.subheader("📚 Orçamentos Simulados")
-    df_sim = pd.DataFrame(st.session_state.simulacoes)
-    st.dataframe(df_sim)
-
-    st.subheader("📊 Comparativo Visual")
-    df_comp = pd.DataFrame(
-        [{"Nome": row["Casa"], "Custo Final": row["Custo Final"]} for _, row in df_casas.iterrows()] +
-        [{"Nome": sim["Nome"], "Custo Final": sim["Custo Final"]} for sim in st.session_state.simulacoes]
-    )
-    fig_comp = px.bar(df_comp, x="Nome", y="Custo Final", text="Custo Final", title="Comparativo entre Orçamentos")
-    fig_comp.update_traces(texttemplate="R$ %{text:.2f}", textposition="outside")
-    st.plotly_chart(fig_comp)
-
-    st.subheader("📥 Exportar Simulações")
-    excel_sim = exportar_simulacoes(df_sim)
-    st.download_button("Baixar Simulações", data=excel_sim, file_name="orcamentos_simulados.xlsx",
-                       mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-
-    # Opcional: botão para limpar simulações
-    if st.button("🗑️ Limpar Simulações"):
-        st.session
+    bdi_mat = st.number_input("BDI Materiais (%)
