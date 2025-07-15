@@ -146,4 +146,4 @@ if st.session_state.simulacoes:
 
     # Exportar simulações
     dados = export_excel(df_sim, "simulacoes.xlsx")
-    st.download_button("📥 Baixar simulações", data=dados, file_name="simulacoes_steel
+    st.download_button("📥 Baixar simulações", data=dados, file_name="simulacoes_steel"
