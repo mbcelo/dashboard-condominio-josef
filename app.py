@@ -161,3 +161,60 @@ with st.form("nova_simulacao"):
     preco = st.number_input("Preço Unitário", value=836.47)
     bdi_mdo = st.number_input("BDI Mão de Obra (%)", value=2.5)
     bdi_mat = st.number_input("BDI Materiais (%)
+                              # === FINALIZAÇÃO DA SIMULAÇÃO ===
+    bdi_mat = st.number_input("BDI Materiais (%)", value=1.3)
+    gerar_simulacao = st.form_submit_button("Gerar Orçamento")
+
+if gerar_simulacao:
+    custo_total = area * preco
+    custo_mdo_bdi = custo_total * (1 + bdi_mdo / 100)
+    custo_final = custo_mdo_bdi * (1 + bdi_mat / 100)
+    eficiencia = 1000 / custo_final
+
+    nova_simulacao = {
+        "Nome": nome,
+        "Área (m²)": area,
+        "Preço Unitário": preco,
+        "Custo Final": custo_final,
+        "Eficiência": eficiencia,
+        "BDI MDO (%)": bdi_mdo,
+        "BDI MAT (%)": bdi_mat
+    }
+    st.session_state.simulacoes.append(nova_simulacao)
+    st.success(f"✅ Simulação '{nome}' criada com sucesso! Custo Final: R$ {custo_final:,.2f}")
+
+# === VISUALIZAÇÃO E EXPORTAÇÃO DAS SIMULAÇÕES ===
+if st.session_state.simulacoes:
+    st.subheader("📚 Simulações Criadas")
+    df_simulacoes = pd.DataFrame(st.session_state.simulacoes)
+    st.dataframe(df_simulacoes)
+
+    # Comparativo com casas originais
+    df_comparativo = pd.DataFrame(
+        [{"Nome": row["Casa"], "Custo Final": row["Custo Final"]} for _, row in df_casas.iterrows()] +
+        [{"Nome": sim["Nome"], "Custo Final": sim["Custo Final"]} for sim in st.session_state.simulacoes]
+    )
+    fig_comp = px.bar(df_comparativo, x="Nome", y="Custo Final", title="Comparativo de Orçamentos", text="Custo Final")
+    fig_comp.update_traces(texttemplate="R$ %{text:.2f}", textposition="outside")
+    st.plotly_chart(fig_comp)
+
+    # Exportar simulações
+    excel_simulacoes = exportar_excel(df_simulacoes, pd.DataFrame(), nome="simulacoes_steel.xlsx")
+    st.download_button("📥 Baixar Simulações em Excel", data=excel_simulacoes,
+                       file_name="simulacoes_steel.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+# === GERADOR DE PROPOSTA EM PDF ===
+st.header("📝 Gerar Proposta em PDF")
+
+if st.session_state.simulacoes:
+    selecionada = st.selectbox("Selecione uma simulação", [sim["Nome"] for sim in st.session_state.simulacoes])
+    sim = next(sim for sim in st.session_state.simulacoes if sim["Nome"] == selecionada)
+    fases_df = calcular_fases(sim["Área (m²)"] * sim["Preço Unitário"])
+
+    caminho_pdf = gerar_proposta_em_pdf(sim, fases_df)
+    with open(caminho_pdf, "rb") as f:
+        st.download_button("📄 Baixar Proposta PDF", data=f.read(),
+                           file_name=f"proposta_{selecionada.lower().replace(' ', '_')}.pdf",
+                           mime="application/pdf")
+else:
+    st.info("Você ainda não criou nenhuma simulação.")
