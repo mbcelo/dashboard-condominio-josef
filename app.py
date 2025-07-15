@@ -144,6 +144,29 @@ if st.session_state.simulacoes:
     fig.update_traces(texttemplate="R$ %{text:.2f}", textposition="outside")
     st.plotly_chart(fig)
 
-    # Exportar simulações
-    dados = export_excel(df_sim, "simulacoes.xlsx")
-    st.download_button("📥 Baixar simulações", data=dados, file_name="simulacoes_steel"
+    # === EXPORTAÇÃO DAS SIMULAÇÕES EM EXCEL ===
+df_sim = pd.DataFrame(st.session_state.simulacoes)
+excel_simulacoes = export_excel(df_sim, "simulacoes_steel.xlsx")
+st.download_button(
+    label="📥 Baixar Simulações",
+    data=excel_simulacoes,
+    file_name="simulacoes_steel.xlsx",
+    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+)
+
+# === GERADOR DE PROPOSTA EM PDF ===
+st.subheader("📝 Gerar Proposta Comercial em PDF")
+
+sim_nome = st.selectbox("Selecione uma simulação para gerar proposta", df_sim["Nome"])
+sim_selecionada = df_sim[df_sim["Nome"] == sim_nome].iloc[0].to_dict()
+fases_sim = calcular_fases(sim_selecionada["Área (m²)"] * sim_selecionada["Preço Unitário"])
+
+# Gerar e salvar PDF
+pdf_path = gerar_proposta(sim_selecionada, fases_sim)
+with open(pdf_path, "rb") as pdf_file:
+    st.download_button(
+        label="📄 Baixar Proposta PDF",
+        data=pdf_file.read(),
+        file_name=f"proposta_{sim_nome.lower().replace(' ', '_')}.pdf",
+        mime="application/pdf"
+    )
